@@ -144,6 +144,7 @@ private:
 	int		_home_pos_sub; 			/**< home position */
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
+ 	orb_advert_t	_pos_sp_triplet_pub;		/**< vehicle global position setpoint publication *////ADDED for global	
 	orb_advert_t	_global_vel_sp_pub;		/**< vehicle global velocity setpoint publication */
 
 	orb_id_t _attitude_setpoint_id;
@@ -471,6 +472,9 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_params.vel_cruise.zero();
 	_params.vel_ff.zero();
 
+	_pos_sp_triplet_pub = nullptr;//ADDED for global
+
+		
 	_pos.zero();
 	_pos_sp.zero();
 	_vel.zero();
@@ -861,6 +865,11 @@ MulticopterPositionControl::task_main_trampoline(int argc, char *argv[])
 void
 MulticopterPositionControl::update_ref()
 {
+    //ADDED for global
+  if (!PX4_ISFINITE(_pos_sp_triplet.current.lat) ||
+      !PX4_ISFINITE(_pos_sp_triplet.current.lon) ||
+      !PX4_ISFINITE(_pos_sp_triplet.current.alt)) {
+    
 	if (_local_pos.ref_timestamp != _ref_timestamp) {
 		double lat_sp, lon_sp;
 		float alt_sp = 0.0f;
@@ -883,6 +892,7 @@ MulticopterPositionControl::update_ref()
 
 		_ref_timestamp = _local_pos.ref_timestamp;
 	}
+  }
 }
 
 void
@@ -1220,8 +1230,16 @@ MulticopterPositionControl::control_offboard(float dt)
 
 		if (_control_mode.flag_control_position_enabled && _pos_sp_triplet.current.position_valid) {
 			/* control position */
-			_pos_sp(0) = _pos_sp_triplet.current.x;
-			_pos_sp(1) = _pos_sp_triplet.current.y;
+			//ADDED for global
+			  if (!PX4_ISFINITE(_pos_sp_triplet.current.lat) ||
+			      !PX4_ISFINITE(_pos_sp_triplet.current.lon) ||
+			      !PX4_ISFINITE(_pos_sp_triplet.current.alt)) {
+				      _pos_sp(0) = _pos_sp_triplet.current.x;
+				      _pos_sp(1) = _pos_sp_triplet.current.y;
+			}else {
+			  _pos_sp(0) = _pos_sp_triplet.current.lat;
+			  _pos_sp(1) = _pos_sp_triplet.current.lon;
+			}
 			_run_pos_control = true;
 
 			_hold_offboard_xy = false;
@@ -1269,7 +1287,10 @@ MulticopterPositionControl::control_offboard(float dt)
 
 		if (_control_mode.flag_control_altitude_enabled && _pos_sp_triplet.current.alt_valid) {
 			/* control altitude as it is enabled */
+			//ADDED for global
+			if(!PX4_ISFINITE(_pos_sp_triplet.current.alt)) {
 			_pos_sp(2) = _pos_sp_triplet.current.z;
+			}else _pos_sp(2) = _pos_sp_triplet.current.alt;
 			_run_alt_control = true;
 
 			_hold_offboard_z = false;
@@ -2337,6 +2358,16 @@ MulticopterPositionControl::task_main()
 			_local_pos_sp.vy = _vel_sp(1);
 			_local_pos_sp.vz = _vel_sp(2);
 
+			//ADDED for global
+			_pos_sp_triplet.timestamp = hrt_absolute_time();
+			_pos_sp_triplet.current.lat = _pos_sp(0);
+			_pos_sp_triplet.current.lon = _pos_sp(1);
+			_pos_sp_triplet.current.alt = _pos_sp(2);
+			_pos_sp_triplet.current.yaw = _att_sp.yaw_body;
+			_pos_sp_triplet.current.vx = _vel_sp(0);
+			_pos_sp_triplet.current.vy = _vel_sp(1);
+			_pos_sp_triplet.current.vz = _vel_sp(2);			
+			
 			/* publish local position setpoint */
 			if (_local_pos_sp_pub != nullptr) {
 				orb_publish(ORB_ID(vehicle_local_position_setpoint), _local_pos_sp_pub, &_local_pos_sp);
@@ -2344,6 +2375,14 @@ MulticopterPositionControl::task_main()
 			} else {
 				_local_pos_sp_pub = orb_advertise(ORB_ID(vehicle_local_position_setpoint), &_local_pos_sp);
 			}
+
+			//ADDED for global but I think it is conflicting with the one in the mavlink reciver
+			if (_pos_sp_triplet_pub != nullptr) {
+				orb_publish(ORB_ID(position_setpoint_triplet), _pos_sp_triplet_pub, & _pos_sp_triplet);
+
+			} else {
+				_pos_sp_triplet_pub = orb_advertise(ORB_ID(position_setpoint_triplet), &_pos_sp_triplet);
+			}			
 
 		} else {
 			/* position controller disabled, reset setpoints */
